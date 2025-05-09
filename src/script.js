@@ -5,6 +5,8 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js'
 import CustomShaderMaterial from 'three-custom-shader-material/vanilla'
 import GUI from 'lil-gui'
+import slicedVertexShader from './shaders/sliced/vertex.glsl'
+import slicedFragmentShader from './shaders/sliced/fragment.glsl'
 
 /**
  * Base
@@ -40,6 +42,26 @@ rgbeLoader.load('./aerodynamics_workshop.hdr', (environmentMap) => {
 /**
  * Sliced model
  */
+const uniforms = {
+  uSliceStart: new THREE.Uniform(1.75),
+  uSliceArc: new THREE.Uniform(1.25),
+}
+
+gui
+  .add(uniforms.uSliceStart, 'value', -Math.PI, Math.PI, 0.001)
+  .name('uSliceStart')
+gui.add(uniforms.uSliceArc, 'value', 0, Math.PI * 2, 0.001).name('uSliceArc')
+
+const patchMap = {
+  csm_Slice: {
+    '#include <colorspace_fragment>': `
+        #include <colorspace_fragment>
+
+        if(!gl_FrontFacing)
+            gl_FragColor = vec4(0.25, 0.85, 0.7, 1.0);
+        `,
+  },
+}
 
 // Material
 const material = new THREE.MeshStandardMaterial({
@@ -51,11 +73,26 @@ const material = new THREE.MeshStandardMaterial({
 const slicedMaterial = new CustomShaderMaterial({
   // CSM
   baseMaterial: THREE.MeshStandardMaterial,
+  vertexShader: slicedVertexShader,
+  fragmentShader: slicedFragmentShader,
+  uniforms: uniforms,
+  patchMap: patchMap,
   // MeshStandardMaterial
-  metalness: 0.9,
-  roughness: 0.15,
+  metalness: 0.95,
+  roughness: 0.1,
   envMapIntensity: 0.5,
   color: '#858080',
+  side: THREE.DoubleSide,
+})
+const slicedDepthMaterial = new CustomShaderMaterial({
+  // CSM
+  baseMaterial: THREE.MeshDepthMaterial,
+  vertexShader: slicedVertexShader,
+  fragmentShader: slicedFragmentShader,
+  uniforms: uniforms,
+  patchMap: patchMap,
+  // MeshStandardMaterial
+  depthPacking: THREE.RGBADepthPacking,
 })
 
 // Model
@@ -65,7 +102,12 @@ gltfLoader.load('./gears.glb', (gltf) => {
 
   model.traverse((child) => {
     if (child.isMesh) {
-      child.material = material
+      if (child.name === 'outerHull') {
+        child.material = slicedMaterial
+        child.customDepthMaterial = slicedDepthMaterial
+      } else {
+        child.material = material
+      }
       child.castShadow = true
       child.receiveShadow = true
     }
@@ -156,6 +198,7 @@ renderer.shadowMap.enabled = true
 renderer.shadowMap.type = THREE.PCFSoftShadowMap
 renderer.toneMapping = THREE.ACESFilmicToneMapping
 renderer.toneMappingExposure = 1
+// renderer.outputColorSpace = THREE.LinearSRGBColorSpace
 renderer.setSize(sizes.width, sizes.height)
 renderer.setPixelRatio(sizes.pixelRatio)
 
